@@ -1,0 +1,50 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  datasource:
+    url: jdbc:h2:mem:southrail-test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+  flyway:
+    enabled: false
+  mail:
+    test-connection: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging.level.com.southrail.reservation: WARN
+
+app:
+  jwt:
+    secret: test-only-jwt-secret-at-least-32-characters
+  cors:
+    allowed-origins: http://localhost:5173
+  mail:
+    from: test@southrail.invalid
+
+gemini:
+  api-key: test-only-gemini-key
+
+razorpay:
+  enabled: false
+  key-id: test-only-key-id
+  key-secret: test-only-key-secret
+  webhook-secret: test-only-webhook-secret
+
+southrail:
+  email-outbox:
+    scheduling-enabled: false
+  features:
+    ai-enabled: false
+    email-enabled: false
+  logging:
+    slow-request-threshold: 2s

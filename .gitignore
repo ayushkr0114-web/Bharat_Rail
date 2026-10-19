@@ -1,0 +1,22 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Frontend build output
+frontend/dist/
+dist/
+
+# Maven build output
+target/
+
+# Node.js dependencies
+node_modules/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+
+# Logs
+*.log
+logs/

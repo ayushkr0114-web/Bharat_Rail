@@ -1,0 +1,225 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  max-width: 100%;
+}
+
+html {
+  font-size: 16px;
+  overflow-x: clip;
+}
+
+#root {
+  overflow-x: clip;
+}
+
+body {
+  margin: 0;
+  overflow-x: clip;
+  line-height: 1.45;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+}
+
+.hero-rail {
+  position: relative;
+  overflow: hidden;
+  background-image:
+    var(--SouthRail-hero-overlay),
+    url("https://images.unsplash.com/photo-1514250609276-c577268ef8fb?auto=format&fit=crop&w=1800&q=80");
+  background-size: cover;
+  background-position: center;
+}
+
+.hero-rail::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--SouthRail-hero-glow);
+}
+
+.hero-rail > * {
+  position: relative;
+  z-index: 1;
+}
+
+.glass-panel {
+  backdrop-filter: blur(18px);
+  background: var(--SouthRail-glass-bg);
+  border: 1px solid var(--SouthRail-glass-border);
+  box-shadow: var(--SouthRail-glass-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.MuiTypography-root,
+.MuiTableCell-root,
+.MuiChip-label,
+.MuiButton-root {
+  overflow-wrap: anywhere;
+}
+
+.MuiButton-root,
+.MuiIconButton-root,
+.MuiListItemButton-root,
+.MuiChip-clickable {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Keep primary actions comfortable to tap without making the UI bulky. */
+.MuiButton-root {
+  min-height: 40px;
+}
+
+.MuiButton-sizeSmall {
+  min-height: 36px;
+}
+
+.MuiButton-sizeLarge {
+  min-height: 48px;
+}
+
+/* Inputs across search, auth and booking should align to one dependable rhythm. */
+.MuiOutlinedInput-root:not(.MuiInputBase-multiline) {
+  min-height: 44px;
+}
+
+/* Status chips stay compact; interactive chips get a larger usable target. */
+.MuiChip-root {
+  min-height: 28px;
+  max-width: 100%;
+}
+
+.MuiChip-sizeSmall {
+  min-height: 24px;
+}
+
+.MuiChip-clickable {
+  min-height: 36px;
+}
+
+.MuiAlert-root {
+  align-items: flex-start;
+}
+
+.MuiButton-root:focus-visible,
+.MuiIconButton-root:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
+  outline: 3px solid rgba(214, 158, 46, 0.72);
+  outline-offset: 2px;
+}
+
+/* Prevent ultra-wide layouts from becoming visually sparse on large monitors. */
+.MuiContainer-maxWidthXl {
+  max-width: 1360px !important;
+}
+
+#main-content {
+  scroll-margin-top: 72px;
+}
+
+.MuiTableContainer-root {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.MuiTableCell-head {
+  white-space: nowrap;
+}
+
+@media print {
+  header,
+  footer,
+  .MuiFab-root,
+  .MuiDrawer-root {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+}
+
+@media (max-width: 599.95px) {
+  .MuiDialog-paper:not(.MuiDialog-paperFullScreen) {
+    margin: 10px;
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .MuiDialogTitle-root {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+
+  .MuiDialogContent-root {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+
+  .MuiDialogActions-root {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+
+  .MuiCardContent-root {
+    padding: 16px !important;
+  }
+
+  .MuiCardContent-root:last-child {
+    padding-bottom: 16px !important;
+  }
+
+  .MuiTableCell-root {
+    padding: 10px 12px !important;
+  }
+
+  .MuiButton-sizeSmall {
+    min-height: 38px;
+  }
+
+  .MuiChip-clickable {
+    min-height: 40px;
+  }
+}

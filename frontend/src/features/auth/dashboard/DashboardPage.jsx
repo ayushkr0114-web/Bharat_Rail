@@ -1,0 +1,1734 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useSelector } from "react-redux";
+import TablePagination from "@mui/material/TablePagination";
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Container,
+  Grid,
+  InputAdornment,
+  MenuItem,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+  Avatar,
+  Skeleton,
+  Divider,
+  alpha,
+} from "@mui/material";
+import { lighten, useTheme } from "@mui/material/styles";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import CancelIcon from "@mui/icons-material/Cancel";
+import ConfirmationNumberIcon from "@mui/icons-material/ConfirmationNumber";
+import DirectionsRailwayIcon from "@mui/icons-material/DirectionsRailway";
+import HistoryIcon from "@mui/icons-material/History";
+import SearchIcon from "@mui/icons-material/Search";
+import TravelExploreIcon from "@mui/icons-material/TravelExplore";
+import TrainIcon from "@mui/icons-material/Train";
+import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
+import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
+import CurrencyRupeeIcon from "@mui/icons-material/CurrencyRupee";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
+
+import { downloadTicketPdf } from "../../../services/downloadTicket.js";
+import api from "../../../services/api.js";
+import BookingCancellationDialog, {
+  canShowCancelButton,
+} from "../../../components/BookingCancellationDialog.jsx";
+import {
+  ErrorState,
+  LoadingState,
+} from "../../../components/StateFeedback.jsx";
+import {
+  RailwayStatusChip,
+} from "../../../components/RailwayStatusChip.jsx";
+import { getApiErrorMessage, isAuthError } from "../../../utils/apiErrors.js";
+import { formatStatus, getBookingStatusLabel } from "../../../utils/bookingStatus.js";
+import { localDateKey } from "../../../utils/date.js";
+
+// ─── Theme helpers ───────────────────────────────────────────────────────────
+function getGreenShades(theme) {
+  const { main, dark, light } = theme.palette.primary;
+  return {
+    dark,
+    main,
+    mid: light,
+    light: lighten(light, theme.palette.mode === "light" ? 0.25 : 0.18),
+  };
+}
+
+function getDashboardTokens(theme) {
+  const { palette } = theme;
+  return {
+    pageBg: palette.background.default,
+    cardBg: palette.background.paper,
+    raisedBg: palette.surface?.raised || palette.background.paper,
+    elevatedBg: palette.surface?.elevated || palette.background.paper,
+    cardBorder: palette.custom?.cardBorder || palette.divider,
+    cardShadow: palette.custom?.cardShadow || theme.shadows[3],
+    divider: palette.divider,
+    textMain: palette.text.primary,
+    textSub: palette.text.secondary,
+    primary: palette.primary.main,
+    primaryLight: palette.primary.light,
+    primaryDark: palette.primary.dark,
+    secondary: palette.secondary.main,
+    secondaryLight: palette.secondary.light,
+    success: palette.success.main,
+    error: palette.error.main,
+  };
+}
+
+const initialFilters = { search: "", status: "ALL" };
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+export default function DashboardPage() {
+  const user = useSelector((state) => state.auth.user);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+  const [history, setHistory] = useState(null);
+  const [notifications, setNotifications] = useState(null);
+  const [loading, setLoading] = useState({
+    history: true,
+    notifications: true,
+  });
+  const [errors, setErrors] = useState({ history: "", notifications: "" });
+  const [filters, setFilters] = useState(initialFilters);
+  const [cancellationPnr, setCancellationPnr] = useState("");
+  const [cancellationOpen, setCancellationOpen] = useState(false);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  const loadDashboard = useCallback(() => {
+    setLoading({ history: true, notifications: true });
+    setErrors({ history: "", notifications: "" });
+    setHistory(null);
+    setNotifications(null);
+
+    api
+      .get("/bookings?page=0&size=20")
+      .then(({ data }) => setHistory(normalizePage(data)))
+      .catch((apiError) => {
+        setHistory({ content: [] });
+        setErrors((c) => ({
+          ...c,
+          history: getDashboardErrorMessage(
+            apiError,
+            "Unable to load booking history right now.",
+          ),
+        }));
+      })
+      .finally(() => setLoading((c) => ({ ...c, history: false })));
+
+    api
+      .get("/notifications?page=0&size=10")
+      .then(({ data }) => setNotifications(normalizeRows(data)))
+      .catch((apiError) => {
+        setNotifications([]);
+        setErrors((c) => ({
+          ...c,
+          notifications: getDashboardErrorMessage(
+            apiError,
+            "Unable to load notifications right now.",
+          ),
+        }));
+      })
+      .finally(() => setLoading((c) => ({ ...c, notifications: false })));
+  }, []);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard, user]);
+
+  const openCancellation = (pnr) => {
+    setCancellationPnr(pnr || "");
+    setCancellationOpen(true);
+  };
+  const closeCancellation = () => setCancellationOpen(false);
+  const handleCancelled = () => loadDashboard();
+
+  const sortedBookings = useMemo(() => sortBookings(history?.content || []), [history]);
+  const metrics = useMemo(
+    () => buildDashboardMetrics(sortedBookings),
+    [sortedBookings],
+  );
+  const filteredBookings = useMemo(
+    () => filterBookings(sortedBookings, filters),
+    [sortedBookings, filters],
+  );
+  const paginatedBookings = filteredBookings.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + rowsPerPage,
+  );
+
+  useEffect(() => {
+    setPage(0);
+  }, [filters]);
+
+  const upcomingBookings = metrics.upcomingBookings;
+  const displayName = user?.fullName || "Passenger";
+  const displayEmail = user?.email || "";
+  const roles = Array.from(user?.roles || []);
+  const historyLoaded = !loading.history && !errors.history;
+
+  return (
+    <Box sx={{ minHeight: "100vh", pb: 4 }}>
+      {/* Hero */}
+      <HeroSection
+        displayName={displayName}
+        displayEmail={displayEmail}
+        roles={roles}
+        loading={loading.history}
+        metrics={metrics}
+        onRefresh={loadDashboard}
+      />
+      <Container
+        maxWidth="xl"
+        sx={{ mt: { xs: -2, md: -2.5 }, position: "relative", zIndex: 1 }}
+      >
+        <Stack spacing={{ xs: 1.5, md: 2 }}>
+          {/* KPI strip */}
+          {loading.history ? (
+            <KpiSkeleton />
+          ) : errors.history ? (
+            <ErrorState
+              title="Travel data unavailable"
+              message={errors.history}
+              actionLabel="Retry"
+              onAction={loadDashboard}
+            />
+          ) : (
+            <KpiStrip metrics={metrics} />
+          )}
+
+          {/* Next Journey + Insights */}
+          <Grid container spacing={2}>
+            <Grid item xs={12} lg={8}>
+              <NextJourneySection
+                loading={loading.history}
+                error={errors.history}
+                bookings={upcomingBookings}
+                onRetry={loadDashboard}
+                onCancelBooking={openCancellation}
+              />
+            </Grid>
+            <Grid item xs={12} lg={4}>
+              <RecentActivitySection
+                bookings={sortedBookings}
+                loading={loading.history}
+              />
+            </Grid>
+          </Grid>
+
+          {/* Booking history */}
+          <BookingHistoryCard
+            loading={loading.history}
+            error={errors.history}
+            rows={paginatedBookings}
+            allRows={sortedBookings}
+            filters={filters}
+            setFilters={setFilters}
+            statusOptions={metrics.statusOptions}
+            historyLoaded={historyLoaded}
+            onRetry={loadDashboard}
+            onCancelBooking={openCancellation}
+          />
+          <Paper
+            variant="outlined"
+            sx={{
+              borderRadius: 2.5,
+              overflowX: "auto",
+              "& .MuiTablePagination-toolbar": {
+                flexWrap: "wrap",
+                justifyContent: { xs: "center", sm: "flex-end" },
+                gap: { xs: 0.5, sm: 1 },
+                px: { xs: 1, sm: 2 },
+              },
+              "& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows":
+                {
+                  my: { xs: 0.5, sm: 0 },
+                  fontSize: { xs: 12, sm: 14 },
+                },
+              "& .MuiTablePagination-actions": {
+                ml: { xs: 0, sm: 2 },
+              },
+            }}
+          >
+            <TablePagination
+              component="div"
+              count={filteredBookings.length}
+              page={page}
+              onPageChange={(event, newPage) => setPage(newPage)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(event) => {
+                setRowsPerPage(parseInt(event.target.value, 10));
+                setPage(0);
+              }}
+              rowsPerPageOptions={[5, 10, 20, 50]}
+            />
+          </Paper>
+          <NotificationsSection
+            notifications={notifications}
+            loading={loading.notifications}
+            error={errors.notifications}
+            onRetry={loadDashboard}
+          />
+        </Stack>
+      </Container>
+      <BookingCancellationDialog
+        pnr={cancellationPnr}
+        open={cancellationOpen}
+        onClose={closeCancellation}
+        onCancelled={handleCancelled}
+      />
+    </Box>
+  );
+}
+
+function NotificationsSection({ notifications, loading, error, onRetry }) {
+  return (
+    <SectionCard
+      id="notifications"
+      title="Travel updates"
+      subtitle="Reservation and account notifications from SouthRail"
+      icon={<NotificationsActiveOutlinedIcon color="primary" fontSize="small" />}
+      action={(
+        <Button size="small" startIcon={<RefreshIcon />} onClick={onRetry} disabled={loading}>
+          Refresh
+        </Button>
+      )}
+    >
+      {loading ? (
+        <LoadingState message="Loading travel updates…" />
+      ) : error ? (
+        <ErrorState title="Updates unavailable" message={error} actionLabel="Retry" onAction={onRetry} />
+      ) : !notifications?.length ? (
+        <Stack alignItems="center" spacing={0.75} sx={{ py: 2.5, textAlign: "center" }}>
+          <NotificationsActiveOutlinedIcon color="disabled" sx={{ fontSize: 34 }} />
+          <Typography fontWeight={800}>No new travel updates</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Booking, waitlist, and account updates will appear here.
+          </Typography>
+        </Stack>
+      ) : (
+        <Stack divider={<Divider flexItem />}>
+          {notifications.map((notification, index) => (
+            <Stack
+              key={notification.id || `${notification.createdAt}-${index}`}
+              direction={{ xs: "column", sm: "row" }}
+              spacing={{ xs: 0.5, sm: 1.5 }}
+              sx={(theme) => ({
+                py: 1.25,
+                px: 1,
+                borderLeft: 3,
+                borderLeftColor: notification.read ? 'transparent' : 'primary.main',
+                bgcolor: notification.read ? 'transparent' : alpha(theme.palette.primary.main, 0.045),
+                borderRadius: 1.5
+              })}
+            >
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography variant="subtitle2" fontWeight={notification.read ? 700 : 900}>
+                    {notification.title || "SouthRail update"}
+                  </Typography>
+                  {!notification.read && <Chip label="New" size="small" color="primary" />}
+                  {notification.channel && <Chip label={notification.channel} size="small" variant="outlined" />}
+                </Stack>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35, overflowWrap: "anywhere" }}>
+                  {notification.message || "An update is available for your account."}
+                </Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+                {formatDateTime(notification.createdAt)}
+              </Typography>
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </SectionCard>
+  );
+}
+
+// ─── Hero ─────────────────────────────────────────────────────────────────────
+function HeroSection({
+  displayName,
+  displayEmail,
+  roles,
+  loading,
+  metrics,
+  onRefresh,
+}) {
+  const theme = useTheme();
+  const greens = getGreenShades(theme);
+  const initial = displayName?.[0]?.toUpperCase() || "P";
+  return (
+    <Box
+      sx={{
+        background: `linear-gradient(135deg, ${greens.dark} 0%, ${greens.main} 60%, ${greens.mid} 100%)`,
+        pt: { xs: 1.5, md: 2 },
+        pb: { xs: 1.5, md: 2 },
+        px: { xs: 1.5, md: 0 },
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <Box
+        sx={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 20,
+          backgroundImage: `repeating-linear-gradient(90deg, ${alpha("#fff", 0.07)} 0px, ${alpha("#fff", 0.07)} 40px, transparent 40px, transparent 80px)`,
+          borderTop: `1px solid ${alpha("#fff", 0.12)}`,
+        }}
+      />
+      <Box
+        sx={{
+          position: "absolute",
+          top: -80,
+          right: -80,
+          width: { xs: 180, md: 380 },
+          height: { xs: 180, md: 380 },
+          borderRadius: "50%",
+          bgcolor: alpha(greens.light, 0.12),
+          pointerEvents: "none",
+        }}
+      />
+      <Container maxWidth="xl">
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={1.5}
+          justifyContent="space-between"
+          alignItems={{ xs: "flex-start", md: "center" }}
+        >
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.5}
+            alignItems={{ xs: "flex-start", sm: "center" }}
+          >
+            <Avatar
+              sx={{
+                width: 36,
+                height: 36,
+                bgcolor: alpha("#ffffff", 0.92),
+                color: greens.dark,
+                fontSize: 18,
+                fontWeight: 900,
+                border: `1px solid ${alpha("#fff", 0.3)}`,
+                flexShrink: 0,
+              }}
+            >
+              {initial}
+            </Avatar>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                sx={{
+                  color: alpha("#fff", 0.65),
+                  fontSize: 13,
+                  fontWeight: 600,
+                  letterSpacing: 1.5,
+                  textTransform: "uppercase",
+                  mb: 0.25,
+                }}
+              >
+                Welcome back
+              </Typography>
+              <Typography
+                variant="h4"
+                sx={{
+                  color: "#fff",
+                  fontWeight: 900,
+                  lineHeight: 1.15,
+                  fontSize: { xs: "1.8rem", sm: "2.125rem" },
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {displayName}
+              </Typography>
+              <Typography
+                sx={{
+                  color: alpha("#fff", 0.6),
+                  fontSize: 14,
+                  mt: 0.25,
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {displayEmail}
+              </Typography>
+              <Stack
+                direction="row"
+                spacing={1}
+                flexWrap="wrap"
+                useFlexGap
+                sx={{ mt: 1 }}
+                justifyContent={{ xs: "flex-start", md: "flex-end" }}
+              >
+                {roles.map((role) => (
+                  <Chip
+                    key={role}
+                    size="small"
+                    label={String(role).replace("ROLE_", "")}
+                    sx={{
+                      bgcolor: alpha("#fff", 0.15),
+                      color: "#fff",
+                      borderColor: alpha("#fff", 0.3),
+                      fontWeight: 700,
+                      fontSize: 11,
+                    }}
+                    variant="outlined"
+                  />
+                ))}
+              </Stack>
+            </Box>
+          </Stack>
+          <Stack
+            spacing={2}
+            alignItems={{ xs: "stretch", md: "flex-end" }}
+            sx={{ width: { xs: "100%", md: "auto" } }}
+          >
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={{ xs: 1, sm: 2 }}
+              flexWrap="wrap"
+              justifyContent={{ xs: "flex-start", md: "flex-end" }}
+            >
+              <HeroStat
+                label="Total Trips"
+                value={loading ? "—" : metrics.totalBookings}
+              />
+              <HeroStat
+                label="Upcoming"
+                value={loading ? "—" : metrics.upcomingCount}
+                highlightColor={greens.light}
+              />
+              <HeroStat
+                label="Confirmed"
+                value={loading ? "—" : metrics.confirmedCount}
+              />
+              <HeroStat
+                label="Cancelled"
+                value={loading ? "—" : metrics.cancelledCount}
+              />
+              {metrics.hasFareData && !loading && (
+                <HeroStat
+                  label="Total Spend"
+                  value={formatFare(metrics.totalSpend)}
+                />
+              )}
+            </Stack>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              spacing={1.5}
+              sx={{
+                "& .MuiButton-root": { width: { xs: "100%", sm: "auto" } },
+              }}
+            >
+              <Button
+                component={Link}
+                to="/"
+                variant="contained"
+                startIcon={<SearchIcon />}
+                sx={{
+                  bgcolor: "#ffffff",
+                  color: greens.dark,
+                  fontWeight: 800,
+                  "&:hover": { bgcolor: alpha("#ffffff", 0.9) },
+                  px: 2,
+                  borderRadius: 1.5,
+                }}
+              >
+                Search Trains
+              </Button>
+              <Button
+                component={Link}
+                to="/pnr"
+                startIcon={<ConfirmationNumberIcon />}
+                sx={{
+                  borderColor: alpha("#fff", 0.45),
+                  color: "#fff",
+                  "&:hover": {
+                    borderColor: "#fff",
+                    bgcolor: alpha("#fff", 0.08),
+                  },
+                  px: 2,
+                  borderRadius: 1.5,
+                }}
+                variant="outlined"
+              >
+                Track PNR
+              </Button>
+              <Button
+                onClick={onRefresh}
+                startIcon={<RefreshIcon />}
+                sx={{
+                  color: alpha("#fff", 0.7),
+                  borderColor: alpha("#fff", 0.25),
+                  "&:hover": {
+                    borderColor: alpha("#fff", 0.5),
+                    bgcolor: alpha("#fff", 0.06),
+                  },
+                  borderRadius: 2,
+                }}
+                variant="outlined"
+                size="small"
+              >
+                Refresh
+              </Button>
+            </Stack>
+          </Stack>
+        </Stack>
+      </Container>
+    </Box>
+  );
+}
+
+function HeroStat({ label, value, highlightColor }) {
+  return (
+    <Box sx={{ textAlign: { xs: "left", sm: "right" }, minWidth: 0 }}>
+      <Typography
+        sx={{
+          color: highlightColor || "#fff",
+          fontWeight: 900,
+          fontSize: { xs: 16, md: 18 },
+          lineHeight: 1,
+        }}
+      >
+        {value}
+      </Typography>
+      <Typography
+        sx={{
+          color: alpha("#fff", 0.55),
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: 0.5,
+          textTransform: "uppercase",
+          mt: 0.2,
+        }}
+      >
+        {label}
+      </Typography>
+    </Box>
+  );
+}
+
+// ─── KPI Strip ────────────────────────────────────────────────────────────────
+function buildKpiCards(metrics, t, greens) {
+  return [
+    {
+      label: "Total Bookings",
+      value: metrics.totalBookings,
+      icon: <ConfirmationNumberIcon />,
+      color: t.primary,
+    },
+    {
+      label: "Upcoming Trips",
+      value: metrics.upcomingCount,
+      icon: <TravelExploreIcon />,
+      color: greens.mid,
+    },
+    {
+      label: "Confirmed",
+      value: metrics.confirmedCount,
+      icon: <CheckCircleIcon />,
+      color: greens.light,
+    },
+    {
+      label: "Cancelled",
+      value: metrics.cancelledCount,
+      icon: <CancelIcon />,
+      color: t.error,
+    },
+    {
+      label: "Completed",
+      value: metrics.completedCount,
+      icon: <DirectionsRailwayIcon />,
+      color: greens.dark,
+    },
+    {
+      label: "Total Spend",
+      value: metrics.hasFareData ? formatFare(metrics.totalSpend) : "Rs 0",
+      icon: <CurrencyRupeeIcon />,
+      color: t.secondary,
+    },
+  ];
+}
+
+function KpiStrip({ metrics }) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  const greens = getGreenShades(theme);
+  if (metrics.totalBookings === 0) {
+    return (
+      <Paper
+        elevation={0}
+        sx={{
+          p: 2.25,
+          borderRadius: 2.5,
+          border: `1px dashed ${t.cardBorder}`,
+          textAlign: "center",
+        }}
+      >
+        <TrainIcon sx={{ fontSize: 40, color: alpha(t.primary, 0.3), mb: 1 }} />
+        <Typography fontWeight={700} color={t.textMain}>
+          No travel statistics yet
+        </Typography>
+        <Typography color={t.textSub} variant="body2">
+          Book your first journey to see summaries here.
+        </Typography>
+      </Paper>
+    );
+  }
+  return (
+    <Grid container spacing={2}>
+      {buildKpiCards(metrics, t, greens).map((card) => (
+        <Grid item xs={12} sm={4} md={2} key={card.label}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 1.25, md: 1 },
+              borderRadius: 2,
+              bgcolor: t.raisedBg,
+              border: `1px solid ${t.cardBorder}`,
+              height: "100%",
+            }}
+          >
+            <Stack spacing={1}>
+              <Box
+                sx={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 1.5,
+                  bgcolor: alpha(card.color, 0.1),
+                  color: card.color,
+                  display: "grid",
+                  placeItems: "center",
+                  '& .MuiSvgIcon-root': { fontSize: 16 }
+                }}
+              >
+                {card.icon}
+              </Box>
+              <Box>
+                <Typography
+                  sx={{
+                    color: t.textSub,
+                    fontSize: { xs: 10, md: 9 },
+                    fontWeight: 600,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {card.label}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontWeight: 900,
+                    fontSize: { xs: 16, md: 17 },
+                    color: t.textMain,
+                    lineHeight: 1.1,
+                    mt: 0.25,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {card.value}
+                </Typography>
+              </Box>
+            </Stack>
+          </Paper>
+        </Grid>
+      ))}
+    </Grid>
+  );
+}
+
+function KpiSkeleton() {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  return (
+    <Grid container spacing={2}>
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <Grid item xs={6} sm={4} md={2} key={i}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 1.5, md: 1.25 },
+              borderRadius: 2,
+              border: `1px solid ${t.cardBorder}`,
+              height: "100%",
+            }}
+          >
+            <Skeleton
+              variant="rounded"
+              width={28}
+              height={28}
+              sx={{ mb: 1, borderRadius: 1.5 }}
+            />
+            <Skeleton width="70%" height={10} sx={{ mb: 0.5 }} />
+            <Skeleton width="50%" height={22} />
+          </Paper>
+        </Grid>
+      ))}
+    </Grid>
+  );
+}
+
+// ─── Next Journey (ticket-style) ─────────────────────────────────────────────
+function NextJourneySection({
+  loading,
+  error,
+  bookings,
+  onRetry,
+  onCancelBooking,
+}) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  const visibleBookings = bookings?.slice(0, 4) || [];
+  return (
+    <SectionCard
+      title="Upcoming Journeys"
+      subtitle={`Showing next ${Math.min(bookings?.length || 0, 4)} upcoming trips`}
+      icon={<TrainIcon sx={{ color: t.primary }} />}
+      action={
+        bookings?.length > 3 ? (
+          <Button
+            component="a"
+            href="#booking-history"
+            size="small"
+            variant="outlined"
+          >
+            View All
+          </Button>
+        ) : null
+      }
+    >
+      {loading && <JourneySkeleton />}
+      {!loading && error && (
+        <ErrorState
+          title="Bookings unavailable"
+          message={error}
+          actionLabel="Retry"
+          onAction={onRetry}
+        />
+      )}
+      {!loading && !error && visibleBookings.length === 0 && (
+        <Box sx={{ py: 4, textAlign: "center" }}>
+          <TrainIcon
+            sx={{ fontSize: 44, color: alpha(t.primary, 0.18), mb: 1 }}
+          />
+          <Typography fontWeight={700} color={t.textMain} sx={{ mb: 0.25 }}>
+            No upcoming trips
+          </Typography>
+          <Typography color={t.textSub} variant="body2" sx={{ mb: 1.25 }}>
+            Search trains and book your next adventure.
+          </Typography>
+          <Button
+            component={Link}
+            to="/"
+            variant="contained"
+            startIcon={<SearchIcon />}
+            sx={{
+              bgcolor: t.primary,
+              color: theme.palette.primary.contrastText,
+              "&:hover": { bgcolor: t.primaryDark },
+              borderRadius: 2,
+            }}
+          >
+            Search Trains
+          </Button>
+        </Box>
+      )}
+      {!loading && !error && visibleBookings.length > 0 && (
+        <Stack spacing={1.25}>
+          {visibleBookings.map((booking, index) => (
+            <TicketCard
+              key={booking.id || booking.pnr}
+              booking={booking}
+              onCancelBooking={onCancelBooking}
+              featured={index === 0}
+            />
+          ))}
+        </Stack>
+      )}
+    </SectionCard>
+  );
+}
+
+function TicketCard({ booking, onCancelBooking, featured }) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  const greens = getGreenShades(theme);
+  const showCancel = booking.pnr && canShowCancelButton(booking.status);
+  const src = booking.sourceCode || booking.sourceName || "—";
+  const dest = booking.destinationCode || booking.destinationName || "—";
+  
+  const handleDownloadTicket = async () => {
+    if (!booking.pnr) {
+      setDownloadError("PNR is not available for this booking.");
+      return;
+    }
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      await downloadTicketPdf(booking.pnr);
+    } catch {
+      setDownloadError(
+        "Unable to download this ticket right now. Please try again.",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        borderRadius: 2.25,
+        border: `1px solid ${featured ? alpha(t.primary, 0.55) : t.cardBorder}`,
+        boxShadow: featured ? `0 8px 22px ${alpha(t.primary, 0.12)}` : "none",
+        bgcolor: featured ? alpha(t.primary, 0.04) : t.raisedBg,
+        overflow: "hidden",
+        position: "relative",
+      }}
+    >
+      {featured && (
+        <Box
+          sx={{
+            height: 4,
+            background: `linear-gradient(90deg, ${greens.dark}, ${greens.mid})`,
+          }}
+        />
+      )}
+      <Box sx={{ p: { xs: 1.25, md: 1.5 } }}>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          alignItems={{ xs: "flex-start", sm: "flex-start" }}
+          spacing={0.5}
+          sx={{ mb: 1 }}
+        >
+          <Box>
+            {featured && (
+              <Typography
+                sx={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: t.primary,
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                  mb: 0.25,
+                }}
+              >
+                Next departure
+              </Typography>
+            )}
+            <Typography
+              variant="h6"
+              fontWeight={900}
+              color={t.textMain}
+              sx={{ lineHeight: 1.2, overflowWrap: "anywhere" }}
+            >
+              {booking.trainName || "Train"}
+            </Typography>
+            <Typography variant="body2" color={t.textSub}>
+              {booking.trainNumber || ""}
+            </Typography>
+          </Box>
+          <Stack spacing={0.5} alignItems={{ xs: "flex-start", sm: "flex-end" }}>
+            <RailwayStatusChip status={booking.status} />
+            <Typography variant="caption" color={t.textSub}>
+              {getBookingStatusLabel(booking.status, booking.reservationLabel)}
+            </Typography>
+          </Stack>
+        </Stack>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          alignItems={{ xs: "stretch", sm: "center" }}
+          spacing={1.5}
+          sx={{ mb: 1.5 }}
+        >
+          <Box sx={{ textAlign: "center" }}>
+            <Typography fontWeight={900} fontSize={16} color={t.textMain}>
+              {src}
+            </Typography>
+            <Typography
+              fontSize={10}
+              color={t.textSub}
+              textTransform="uppercase"
+              letterSpacing={0.5}
+            >
+              Origin
+            </Typography>
+          </Box>
+          <Box
+            sx={{ flex: 1, display: "flex", alignItems: "center", gap: 0.5 }}
+          >
+            <FiberManualRecordIcon sx={{ fontSize: 8, color: t.primary }} />
+            <Box
+              sx={{
+                flex: 1,
+                height: 2,
+                bgcolor: t.divider,
+                borderRadius: 1,
+                position: "relative",
+              }}
+            >
+              <Box
+                sx={{
+                  position: "absolute",
+                  top: -3,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                }}
+              >
+                <TrainIcon sx={{ fontSize: 14, color: t.primary }} />
+              </Box>
+            </Box>
+            <FiberManualRecordIcon sx={{ fontSize: 8, color: t.primary }} />
+          </Box>
+          <Box sx={{ textAlign: "center" }}>
+            <Typography fontWeight={900} fontSize={16} color={t.textMain}>
+              {dest}
+            </Typography>
+            <Typography
+              fontSize={10}
+              color={t.textSub}
+              textTransform="uppercase"
+              letterSpacing={0.5}
+            >
+              Destination
+            </Typography>
+          </Box>
+        </Stack>
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+          flexWrap="wrap"
+          gap={1}
+        >
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
+            <MetaItem label="Date" value={formatDate(booking.journeyDate)} />
+            <MetaItem label="PNR" value={booking.pnr || "—"} />
+            <MetaItem label="Fare" value={formatFare(booking.totalFare)} bold />
+            <MetaItem label="Reservation" value={getBookingStatusLabel(booking.status, booking.reservationLabel)} />
+          </Stack>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1}
+            sx={{
+              width: { xs: "100%", sm: "auto" },
+              "& .MuiButton-root": {
+                width: { xs: "100%", sm: "auto" },
+              },
+            }}
+          >
+            <Button
+              size="small"
+              startIcon={<PictureAsPdfIcon />}
+              disabled={!booking.pnr || downloading}
+              onClick={handleDownloadTicket}
+              sx={{ borderRadius: 2 }}
+              variant="contained"
+            >
+              {downloading ? "Downloading..." : "Ticket"}
+            </Button>
+            {downloadError && (
+              <Alert
+                severity="error"
+                sx={{ width: "100%", py: 0, alignItems: "center" }}
+              >
+                {downloadError}
+              </Alert>
+            )}
+            <Button
+              component={Link}
+              to={`/pnr?pnr=${booking.pnr || ""}`}
+              size="small"
+              startIcon={<ConfirmationNumberIcon />}
+              disabled={!booking.pnr}
+              sx={{
+                borderRadius: 2,
+                borderColor: t.primary,
+                color: t.primary,
+                "&:hover": { bgcolor: alpha(t.primary, 0.07) },
+              }}
+              variant="outlined"
+            >
+              Track
+            </Button>
+            {showCancel && (
+              <Button
+                size="small"
+                color="error"
+                startIcon={<CancelIcon />}
+                sx={{ borderRadius: 2 }}
+                variant="outlined"
+                onClick={() => onCancelBooking(booking.pnr)}
+              >
+                Cancel
+              </Button>
+            )}
+          </Stack>
+        </Stack>
+      </Box>
+    </Box>
+  );
+}
+
+function MetaItem({ label, value, bold }) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  return (
+    <Box>
+      <Typography
+        sx={{
+          fontSize: 10,
+          color: t.textSub,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        sx={{
+          fontSize: 13,
+          fontWeight: bold ? 900 : 700,
+          color: bold ? t.primary : t.textMain,
+        }}
+      >
+        {value}
+      </Typography>
+    </Box>
+  );
+}
+
+function JourneySkeleton() {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  return (
+    <Box
+      sx={{
+        borderRadius: 2.25,
+        border: `1px solid ${t.cardBorder}`,
+        overflow: "hidden",
+      }}
+    >
+      <Skeleton variant="rectangular" height={4} />
+      <Box sx={{ p: 2 }}>
+        <Skeleton width="40%" height={14} sx={{ mb: 0.5 }} />
+        <Skeleton width="60%" height={28} sx={{ mb: 1.5 }} />
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          alignItems={{ xs: "stretch", sm: "center" }}
+          spacing={1.5}
+          sx={{ mb: 1.5 }}
+        >
+          <Skeleton width={48} height={36} />
+          <Box sx={{ flex: 1 }}>
+            <Skeleton height={8} />
+          </Box>
+          <Skeleton width={48} height={36} />
+        </Stack>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
+          <Skeleton width={60} height={36} />
+          <Skeleton width={60} height={36} />
+          <Skeleton width={60} height={36} />
+        </Stack>
+      </Box>
+    </Box>
+  );
+}
+
+function RecentActivitySection({ bookings, loading }) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  const activities = useMemo(() => buildActivity(bookings, t), [bookings, t]);
+  if (loading) return null;
+  if (activities.length === 0) return null;
+  return (
+    <SectionCard
+      title="Recent Activity"
+      subtitle="Latest booking events on your account"
+      icon={<HistoryIcon sx={{ color: t.primary }} />}
+    >
+      <Stack spacing={0}>
+        {activities.map((item, idx) => (
+          <Box key={idx} sx={{ display: "flex", gap: 1.25, position: "relative" }}>
+            {idx < activities.length - 1 && (
+              <Box
+                sx={{
+                  position: "absolute",
+                  left: 14,
+                  top: 22,
+                  bottom: 0,
+                  width: 2,
+                  bgcolor: t.divider,
+                  zIndex: 0,
+                }}
+              />
+            )}
+            <Box
+              sx={{
+                width: 36,
+                height: 36,
+                borderRadius: "50%",
+                flexShrink: 0,
+                zIndex: 1,
+                bgcolor: alpha(item.color, 0.12),
+                color: item.color,
+                display: "grid",
+                placeItems: "center",
+                fontSize: 16,
+                mt: 1,
+              }}
+            >
+              {item.icon}
+            </Box>
+            <Box sx={{ pb: 1.5, flex: 1 }}>
+              <Typography fontWeight={800} fontSize={14} color={t.textMain}>
+                {item.title}
+              </Typography>
+              <Typography fontSize={13} color={t.textSub} sx={{ mb: 0.5 }}>
+                {item.detail}
+              </Typography>
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                sx={{ mt: 0.5 }}
+              >
+                <Chip
+                  component={Link}
+                  clickable
+                  to={`/pnr?pnr=${item.pnr}`}
+                  label={`PNR: ${item.pnr}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                />
+                <Typography variant="caption" color={t.textSub}>•</Typography>
+                <Typography variant="caption" color={t.textSub}>{item.time}</Typography>
+              </Stack>
+            </Box>
+          </Box>
+        ))}
+      </Stack>
+    </SectionCard>
+  );
+}
+
+function buildActivity(bookings, t) {
+  return bookings.slice(0, 5).map((b) => {
+    const status = normalizeStatus(b.status);
+    const isCancelled = status === "CANCELLED";
+    const isConfirmed = status === "CONFIRMED";
+    const isRac = status === "RAC";
+    const isWaitlisted = status === "WAITLISTED";
+    return {
+      title: isCancelled
+        ? "Booking cancelled"
+        : isConfirmed
+          ? "Booking confirmed"
+          : isRac
+            ? "Booking placed in RAC"
+            : isWaitlisted
+              ? "Booking waitlisted"
+              : "Booking created",
+      detail: `${b.trainName || "Train"} · ${formatRoute(b)}`,
+      pnr: b.pnr,
+      time: b.createdAt
+        ? formatDateTime(b.createdAt)
+        : formatDate(b.journeyDate),
+      icon: isCancelled ? (
+        <CancelOutlinedIcon fontSize="small" />
+      ) : isConfirmed ? (
+        <CheckCircleIcon fontSize="small" />
+      ) : (
+        <AddCircleOutlineIcon fontSize="small" />
+      ),
+      color: isCancelled ? t.error : isConfirmed ? t.primary : t.secondary,
+    };
+  });
+}
+
+function BookingHistoryCard({
+  loading,
+  error,
+  rows,
+  allRows,
+  filters,
+  setFilters,
+  statusOptions,
+  historyLoaded,
+  onRetry,
+  onCancelBooking,
+  action,
+}) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  return (
+    <SectionCard
+      id="booking-history"
+      title="Booking History"
+      subtitle="Search reservations by PNR, train, route, or status"
+      icon={<HistoryIcon sx={{ color: t.primary }} />}
+      action={
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={1}
+          sx={{ "& .MuiButton-root": { width: { xs: "100%", sm: "auto" } } }}
+        >
+          {action}
+          <Button
+            component={Link}
+            to="/pnr"
+            startIcon={<ConfirmationNumberIcon />}
+            variant="outlined"
+            size="small"
+            sx={{
+              borderRadius: 2,
+              borderColor: t.primary,
+              color: t.primary,
+              "&:hover": { bgcolor: alpha(t.primary, 0.07) },
+            }}
+          >
+            Track PNR
+          </Button>
+        </Stack>
+      }
+    >
+      {loading && <LoadingState message="Loading booking history..." />}
+      {!loading && error && (
+        <ErrorState
+          title="Booking history unavailable"
+          message={error}
+          actionLabel="Retry"
+          onAction={onRetry}
+        />
+      )}
+      {historyLoaded && (
+        <Stack spacing={1.75}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={1.5}
+            sx={{ "& .MuiButton-root": { width: { xs: "100%", sm: "auto" } } }}
+          >
+            <TextField
+              fullWidth
+              size="small"
+              label="Search by PNR, train, or route"
+              value={filters.search}
+              onChange={(e) => setFilters((c) => ({ ...c, search: e.target.value }))}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" sx={{ color: t.textSub }} />
+                  </InputAdornment>
+                ),
+                sx: { borderRadius: 2 },
+              }}
+            />
+            <TextField
+              select
+              size="small"
+              label="Status"
+              value={filters.status}
+              onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))}
+              sx={{ minWidth: { xs: "100%", sm: 180 }, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+            >
+              <MenuItem value="ALL">All statuses</MenuItem>
+              {statusOptions.map((s) => (
+                <MenuItem key={s} value={s}>{formatStatus(s)}</MenuItem>
+              ))}
+            </TextField>
+          </Stack>
+          {allRows.length === 0 && (
+            <Box sx={{ py: 3, textAlign: "center" }}>
+              <ConfirmationNumberIcon sx={{ fontSize: 40, color: alpha(t.primary, 0.2), mb: 0.5 }} />
+              <Typography fontWeight={700} color={t.textMain} sx={{ mb: 0.25 }}>No bookings yet</Typography>
+              <Typography color={t.textSub} variant="body2">Search trains and book your first journey.</Typography>
+            </Box>
+          )}
+          {allRows.length > 0 && rows.length === 0 && (
+            <Box sx={{ py: 3, textAlign: "center" }}>
+              <SearchIcon sx={{ fontSize: 32, color: alpha(t.primary, 0.2), mb: 0.5 }} />
+              <Typography color={t.textSub} variant="body2">No bookings match your search.</Typography>
+            </Box>
+          )}
+          {rows.length > 0 && (
+            <BookingHistoryTable rows={rows} onCancelBooking={onCancelBooking} />
+          )}
+        </Stack>
+      )}
+    </SectionCard>
+  );
+}
+
+function BookingHistoryTable({ rows, onCancelBooking }) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  return (
+    <TableContainer
+      component={Paper}
+      variant="outlined"
+      sx={{ borderRadius: 2.5, border: `1px solid ${t.cardBorder}`, overflowX: "auto" }}
+    >
+      <Table size="small" aria-label="Booking history table" sx={{ minWidth: { xs: 760, md: 820 } }}>
+        <TableHead>
+          <TableRow sx={{ bgcolor: alpha(t.primary, 0.04) }}>
+            {["PNR", "Train", "Route", "Journey date", "Status", "Fare", "Actions"].map((h) => (
+              <TableCell
+                key={h}
+                sx={{
+                  fontWeight: 800,
+                  color: t.textMain,
+                  fontSize: 12,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  borderBottom: `1px solid ${t.divider}`,
+                }}
+              >
+                {h}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((booking) => (
+            <BookingHistoryRow
+              key={booking.id || booking.pnr}
+              booking={booking}
+              onCancelBooking={onCancelBooking}
+              tokens={t}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function BookingHistoryRow({ booking, onCancelBooking, tokens: t }) {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+  const canDownload = Boolean(booking.pnr);
+  const canCancel = booking.pnr && canShowCancelButton(booking.status);
+
+  const handleDownloadTicket = async () => {
+    if (!booking.pnr) {
+      setDownloadError("PNR is not available for this booking.");
+      return;
+    }
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      await downloadTicketPdf(booking.pnr);
+    } catch {
+      setDownloadError("Unable to download this ticket right now.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <TableRow
+      hover
+      sx={{
+        "&:hover": { bgcolor: alpha(t.primary, 0.03) },
+        "&:last-child td": { borderBottom: 0 },
+      }}
+    >
+      <TableCell
+        sx={{ whiteSpace: "nowrap", fontWeight: 700, color: t.primary, fontSize: 13 }}
+      >
+        {booking.pnr || "—"}
+      </TableCell>
+      <TableCell sx={{ minWidth: 180, maxWidth: 260 }}>
+        <Typography
+          fontWeight={800}
+          fontSize={14}
+          color={t.textMain}
+          sx={{ overflowWrap: "anywhere" }}
+        >
+          {booking.trainName || "Train"}
+        </Typography>
+        <Typography color={t.textSub} variant="body2" sx={{ overflowWrap: "anywhere" }}>
+          {booking.trainNumber || "—"}
+        </Typography>
+      </TableCell>
+      <TableCell
+        sx={{ minWidth: 160, maxWidth: 240, fontSize: 13, color: t.textMain, overflowWrap: "anywhere" }}
+      >
+        {formatRoute(booking)}
+      </TableCell>
+      <TableCell sx={{ whiteSpace: "nowrap", fontSize: 13, color: t.textMain }}>
+        {formatDate(booking.journeyDate)}
+      </TableCell>
+      <TableCell><RailwayStatusChip status={booking.status} /></TableCell>
+      <TableCell
+        sx={{ whiteSpace: "nowrap", fontWeight: 800, fontSize: 13, color: t.textMain }}
+      >
+        {formatFare(booking.totalFare)}
+      </TableCell>
+      <TableCell sx={{ minWidth: 210 }}>
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+          <Button
+            size="small"
+            startIcon={<PictureAsPdfIcon />}
+            disabled={!canDownload || downloading}
+            onClick={handleDownloadTicket}
+            sx={{ borderRadius: 1.5, fontSize: 12 }}
+            variant="contained"
+          >
+            {downloading ? "Downloading..." : "Ticket"}
+          </Button>
+          <Button
+            component={Link}
+            to={`/pnr?pnr=${booking.pnr || ""}`}
+            size="small"
+            disabled={!booking.pnr}
+            sx={{
+              borderRadius: 1.5,
+              fontSize: 12,
+              borderColor: t.primary,
+              color: t.primary,
+              "&:hover": { bgcolor: alpha(t.primary, 0.07) },
+            }}
+            variant="outlined"
+          >
+            Track
+          </Button>
+          {canCancel && (
+            <Button
+              size="small"
+              color="error"
+              startIcon={<CancelIcon />}
+              sx={{ borderRadius: 1.5, fontSize: 12 }}
+              variant="outlined"
+              onClick={() => onCancelBooking(booking.pnr)}
+            >
+              Cancel
+            </Button>
+          )}
+          {downloadError && (
+            <Alert severity="error" sx={{ width: "100%", py: 0 }}>
+              {downloadError}
+            </Alert>
+          )}
+        </Stack>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function SectionCard({ id, title, subtitle, icon, action, children }) {
+  const theme = useTheme();
+  const t = getDashboardTokens(theme);
+  return (
+    <Paper
+      id={id}
+      elevation={0}
+      sx={{
+        bgcolor: t.cardBg,
+        borderRadius: 2.25,
+        border: `1px solid ${t.cardBorder}`,
+        overflow: "hidden",
+      }}
+    >
+      <Box sx={{ px: { xs: 1.5, md: 1.75 }, pt: { xs: 1.25, md: 1.5 }, pb: 1 }}>
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          justifyContent="space-between"
+          alignItems={{ sm: "center" }}
+          spacing={0.5}
+          sx={{ mb: 1 }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center">
+            {icon}
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                variant="subtitle1"
+                fontWeight={900}
+                color={t.textMain}
+                sx={{ lineHeight: 1.2, overflowWrap: "anywhere" }}
+              >
+                {title}
+              </Typography>
+              {subtitle && <Typography variant="caption" color={t.textSub}>{subtitle}</Typography>}
+            </Box>
+          </Stack>
+          {action}
+        </Stack>
+        <Divider sx={{ mb: 1, borderColor: t.divider }} />
+        {children}
+      </Box>
+    </Paper>
+  );
+}
+
+function buildDashboardMetrics(bookings) {
+  const today = localDateKey();
+  const upcomingBookings = bookings
+    .filter(
+      (b) =>
+        b.journeyDate >= today && normalizeStatus(b.status) !== "CANCELLED",
+    )
+    .sort((a, b) =>
+      String(a.journeyDate || "").localeCompare(String(b.journeyDate || "")),
+    );
+  const confirmedCount = bookings.filter(
+    (b) => normalizeStatus(b.status) === "CONFIRMED",
+  ).length;
+  const cancelledCount = bookings.filter(
+    (b) => normalizeStatus(b.status) === "CANCELLED",
+  ).length;
+  const completedCount = bookings.filter(
+    (b) =>
+      b.journeyDate < today &&
+      !["CANCELLED", "FAILED"].includes(normalizeStatus(b.status)),
+  ).length;
+  const fareValues = bookings
+    .map((b) => Number(b.totalFare))
+    .filter(Number.isFinite);
+  const totalSpend = fareValues.reduce((sum, v) => sum + v, 0);
+  const statusOptions = Array.from(
+    new Set(bookings.map((b) => normalizeStatus(b.status)).filter(Boolean)),
+  ).sort();
+  return {
+    totalBookings: bookings.length,
+    upcomingBookings,
+    upcomingCount: upcomingBookings.length,
+    confirmedCount,
+    cancelledCount,
+    completedCount,
+    hasFareData: fareValues.length > 0,
+    totalSpend,
+    statusOptions,
+    mostBookedRoute: topBookingGroup(bookings, formatRoute),
+    mostTravelledTrain: topBookingGroup(bookings, (b) =>
+      b.trainNumber ? `${b.trainNumber} – ${b.trainName || "Train"}` : "",
+    ),
+  };
+}
+
+function topBookingGroup(bookings, getKey) {
+  const counts = bookings.reduce((cur, b) => {
+    const k = getKey(b);
+    if (!k) return cur;
+    cur[k] = (cur[k] || 0) + 1;
+    return cur;
+  }, {});
+  const [label, count] =
+    Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+  return label ? { label, count } : null;
+}
+
+function filterBookings(bookings, filters) {
+  const query = String(filters.search || "")
+    .trim()
+    .toLowerCase();
+  return bookings.filter((b) => {
+    const matchesQuery =
+      !query ||
+      [
+        b.pnr,
+        b.trainNumber,
+        b.trainName,
+        b.sourceCode,
+        b.sourceName,
+        b.destinationCode,
+        b.destinationName,
+        b.status,
+      ].some((v) =>
+        String(v || "")
+          .toLowerCase()
+          .includes(query),
+      );
+    const matchesStatus =
+      filters.status === "ALL" || normalizeStatus(b.status) === filters.status;
+    return matchesQuery && matchesStatus;
+  });
+}
+
+function sortBookings(bookings) {
+  return [...bookings].sort((a, b) => {
+    if (a.createdAt || b.createdAt)
+      return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
+    return String(b.journeyDate || "").localeCompare(
+      String(b.journeyDate || ""),
+    );
+  });
+}
+
+function normalizePage(data) {
+  if (Array.isArray(data)) return { content: data };
+  return data?.content ? data : { content: [] };
+}
+
+function normalizeRows(data) {
+  if (Array.isArray(data)) return data;
+  return data?.content || [];
+}
+
+function normalizeStatus(status) {
+  return String(status || "")
+    .trim()
+    .toUpperCase();
+}
+
+function formatRoute(booking) {
+  const src = booking.sourceCode || booking.sourceName || "—";
+  const dest = booking.destinationCode || booking.destinationName || "—";
+  return `${src} to ${dest}`;
+}
+
+function formatDate(value) {
+  return value ? String(value) : "—";
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
+  } catch {
+    return String(value);
+  }
+}
+
+function formatFare(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "Rs —";
+  return `Rs ${amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getDashboardErrorMessage(error, fallback) {
+  if (isAuthError(error)) return "Please login again to continue.";
+  return getApiErrorMessage(error, fallback);
+}

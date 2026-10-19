@@ -1,0 +1,60 @@
+
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/bharatrail}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD}
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 10000
+          writetimeout: 10000
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:local-development-secret-change-before-use}
+  mail:
+    from: ${MAIL_FROM:${SMTP_USERNAME:noreply@gmail.com}}
+
+gemini:
+  api-key: ${GEMINI_API_KEY:local-gemini-key-not-configured}
+
+razorpay:
+  enabled: ${RAZORPAY_ENABLED:true}
+  key-id: ${RAZORPAY_KEY_ID:}
+  key-secret: ${RAZORPAY_KEY_SECRET:}
+  webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  base-url: https://api.razorpay.com/v1
+
+southrail:
+  features:
+    ai-enabled: ${AI_ENABLED:false}
+    email-enabled: ${EMAIL_ENABLED:false}
+
+email-outbox:
+  scheduling-enabled: false
+  poll-delay: 5000
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.southrail.reservation: DEBUG
+    org.springframework.mail: DEBUG
